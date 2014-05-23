@@ -322,6 +322,18 @@ class PostSerializer < ActiveModel::Serializer
 end
 ```
 
+If you have attributes in an associated object that you want to appear
+as an attribute of your JSON you can use the `flattened_attributes` method.
+In the example below the value of the attribute `favorite_food_name` will come from
+`object.favorite_food.name`. 
+
+```ruby
+class UserSerializer < ActiveModel::Serializer
+  flattened_attributes favorite_food_name: [:favorite_food, :name],
+                       favorite_food_description: [:favorite_food, :description]
+end
+```
+
 If you would like to add meta information to the outputted JSON, use the `:meta`
 option:
 

@@ -6,10 +6,16 @@ ActiveRecord::Base.establish_connection(
 )
 
 ActiveRecord::Schema.define do
+  
+  create_table :ar_users, force: true do |t|
+    t.string :name
+  end
+  
   create_table :ar_posts, force: true do |t|
     t.string     :title
     t.text       :body
     t.belongs_to :ar_section, index: true
+    t.belongs_to :ar_user
     t.timestamps
   end
 
@@ -36,10 +42,15 @@ ActiveRecord::Schema.define do
   end
 end
 
+class ARUser < ActiveRecord::Base
+  has_many :ar_posts, class_name: 'ARPost'
+end
+
 class ARPost < ActiveRecord::Base
   has_many :ar_comments, class_name: 'ARComment'
   has_and_belongs_to_many :ar_tags, class_name: 'ARTag', join_table: :ar_posts_tags
   belongs_to :ar_section, class_name: 'ARSection'
+  belongs_to :ar_user, class_name: 'ARUser'
 end
 
 class ARComment < ActiveRecord::Base
@@ -55,7 +66,7 @@ end
 
 class ARPostSerializer < ActiveModel::Serializer
   attributes :title, :body
-
+  flattened_attributes ar_user_name: [:ar_user, :name]
   has_many :ar_comments, :ar_tags
   has_one  :ar_section
 end
@@ -76,6 +87,7 @@ end
 
 ARPost.create(title: 'New post',
               body:  'A body!!!',
+              ar_user: ARUser.create(name: 'Stumpy Joe'),
               ar_section: ARSection.create(name: 'ruby')).tap do |post|
 
   short_tag = post.ar_tags.create(name: 'short')

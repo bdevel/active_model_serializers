@@ -15,9 +15,10 @@ module ActiveModel
       def inherited(base)
         base._root = _root
         base._attributes = (_attributes || []).dup
+        base._flattened_attributes = (_flattened_attributes || {}).dup
         base._associations = (_associations || {}).dup
       end
-
+      
       def setup
         @mutex.synchronize do
           yield CONFIG
@@ -60,7 +61,7 @@ end
         end
       end
 
-      attr_accessor :_root, :_attributes, :_associations
+      attr_accessor :_root, :_attributes, :_associations, :_flattened_attributes
       alias root  _root=
       alias root= _root=
 
@@ -68,6 +69,21 @@ end
         name.demodulize.underscore.sub(/_serializer$/, '') if name
       end
 
+      # Returns a hash which indicates which methods will be called
+      # on the object to get the value of the attributes. This is
+      # useful when you use flattened_attributes or you use
+      # different attribute names in your JSON than you do in Ruby
+      # and need to know what these mappings are. Note that if 
+      # you use any methods in the serializer as an output attribute,
+      # only the name of the attribute will be returned and 
+      # not a reference to the method.
+      def attribute_method_mapping
+        @_attributes.inject({}) do |out, attr|
+          out[attr] = @_flattened_attributes[attr] || [attr]
+          out
+        end
+      end
+      
       def attributes(*attrs)
         @_attributes.concat attrs
 
@@ -77,7 +93,26 @@ end
           end unless method_defined?(attr)
         end
       end
-
+      
+      def flattened_attributes(*args)
+        attrs = args.first
+        @_flattened_attributes.merge! attrs
+        
+        attrs.each_key do |attr_name|
+          define_method(attr_name) do
+            flatten_calls = attrs[attr_name].dup
+            call_to_serialize = flatten_calls.pop
+            obj = object # start with the current object
+            flatten_calls.each do |call|
+              obj = obj.send(call)
+              return nil if obj.nil?
+            end
+            obj.read_attribute_for_serialization(call_to_serialize)
+          end unless method_defined?(attr_name)
+        end
+        attributes *attrs.keys
+      end
+      
       def has_one(*attrs)
         associate(Association::HasOne, *attrs)
       end
@@ -120,7 +155,7 @@ end
         root
       end
     end
-
+    
     def attributes
       filter(self.class._attributes.dup).each_with_object({}) do |name, hash|
         hash[name] = send(name)

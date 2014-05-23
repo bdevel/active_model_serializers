@@ -14,6 +14,7 @@ module ActiveModel
         assert_equal({
           'ar_post' => {
             title: 'New post', body: 'A body!!!',
+            ar_user_name: 'Stumpy Joe',
             ar_comments: [{ body: 'what a dumb post', ar_tags: [{ name: 'happy' }, { name: 'whiny' }] },
                           { body: 'i liked it', ar_tags: [{:name=>"happy"}, {:name=>"short"}] }],
             ar_tags: [{ name: 'short' }, { name: 'whiny' }],
@@ -29,6 +30,7 @@ module ActiveModel
           assert_equal({
             'ar_post' => {
               title: 'New post', body: 'A body!!!',
+              :ar_user_name => 'Stumpy Joe',
               'ar_comment_ids' => [1, 2],
               'ar_tag_ids' => [1, 2],
               'ar_section_id' => 1
@@ -45,6 +47,7 @@ module ActiveModel
             assert_equal({
               'ar_post' => {
                 title: 'New post', body: 'A body!!!',
+                ar_user_name: 'Stumpy Joe',
                 'ar_comment_ids' => [1, 2],
                 'ar_tag_ids' => [1, 2],
                 'ar_section_id' => 1
