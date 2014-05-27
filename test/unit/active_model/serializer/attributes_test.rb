@@ -36,6 +36,16 @@ module ActiveModel
         assert_equal([:name, :description],
                      another_inherited_serializer_klass._attributes)
       end
+      
+      def test_attribute_method_mapping
+        expected = {
+          :name => [:name],
+          :language => [:language],
+          :profile_name => [:profile, :name]
+        }
+        assert_equal expected, AdminSerializer.attribute_method_mapping()
+      end
+      
     end
   end
 end

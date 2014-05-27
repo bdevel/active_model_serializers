@@ -22,6 +22,12 @@ class User < Model
   end
 end
 
+class Admin < Model
+  def profile
+    @profile ||= Profile.new(name: 'N2', description: 'D2')
+  end
+end
+
 class Profile < Model
 end
 
@@ -42,6 +48,15 @@ class UserSerializer < ActiveModel::Serializer
   attributes :name, :email
 
   has_one :profile
+end
+
+class AdminSerializer < ActiveModel::Serializer
+  attributes :name, :language
+  flattened_attributes profile_name: [:profile, :name]
+  
+  def language
+    'en'
+  end
 end
 
 class ProfileSerializer < ActiveModel::Serializer
