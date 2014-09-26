@@ -1,6 +1,6 @@
 require 'active_model/array_serializer'
 require 'active_model/serializable'
-require 'active_model/serializer/associations'
+require 'active_model/serializer/association'
 require 'active_model/serializer/config'
 
 require 'thread'
@@ -25,9 +25,21 @@ module ActiveModel
         end
       end
 
+      EMBED_IN_ROOT_OPTIONS = [
+        :include,
+        :embed_in_root,
+        :embed_in_root_key,
+        :embed_namespace
+      ].freeze
+
       def embed(type, options={})
         CONFIG.embed = type
-        CONFIG.embed_in_root = true if options[:embed_in_root] || options[:include]
+        if EMBED_IN_ROOT_OPTIONS.any? { |opt| options[opt].present? }
+          CONFIG.embed_in_root = true
+        end
+        if options[:embed_in_root_key].present?
+          CONFIG.embed_in_root_key = options[:embed_in_root_key]
+        end
         ActiveSupport::Deprecation.warn <<-WARN
 ** Notice: embed is deprecated. **
 The use of .embed method on a Serializer will be soon removed, as this should have a global scope and not a class scope.
@@ -39,25 +51,20 @@ end
         WARN
       end
 
-      if RUBY_VERSION >= '2.0'
-        def serializer_for(resource)
-          if resource.respond_to?(:to_ary)
-            ArraySerializer
+      def format_keys(format)
+        @key_format = format
+      end
+      attr_reader :key_format
+
+      def serializer_for(resource, options = {})
+        if resource.respond_to?(:each)
+          if Object.constants.include?(:ArraySerializer)
+            ::ArraySerializer
           else
-            begin
-              Object.const_get "#{resource.class.name}Serializer"
-            rescue NameError
-              nil
-            end
-          end
-        end
-      else
-        def serializer_for(resource)
-          if resource.respond_to?(:to_ary)
             ArraySerializer
-          else
-            "#{resource.class.name}Serializer".safe_constantize
           end
+        else
+          _const_get build_serializer_class(resource, options)
         end
       end
 
@@ -66,7 +73,10 @@ end
       alias root= _root=
 
       def root_name
-        name.demodulize.underscore.sub(/_serializer$/, '') if name
+        if name
+          root_name = name.demodulize.underscore.sub(/_serializer$/, '')
+          CONFIG.plural_default_root ? root_name.pluralize : root_name
+        end
       end
 
       # Returns a hash which indicates which methods will be called
@@ -85,10 +95,12 @@ end
       end
       
       def attributes(*attrs)
-        @_attributes.concat attrs
-
         attrs.each do |attr|
-          define_method attr do
+          striped_attr = strip_attribute attr
+
+          @_attributes << striped_attr
+
+          define_method striped_attr do
             object.read_attribute_for_serialization attr
           end unless method_defined?(attr)
         end
@@ -123,6 +135,22 @@ end
 
       private
 
+      def strip_attribute(attr)
+        symbolized = attr.is_a?(Symbol)
+
+        attr = attr.to_s.gsub(/\?\Z/, '')
+        attr = attr.to_sym if symbolized
+        attr
+      end
+
+      def build_serializer_class(resource, options)
+        "".tap do |klass_name|
+          klass_name << "#{options[:namespace]}::" if options[:namespace]
+          klass_name << options[:prefix].to_s.classify if options[:prefix]
+          klass_name << "#{resource.class.name}Serializer"
+        end
+      end
+
       def associate(klass, *attrs)
         options = attrs.extract_options!
 
@@ -140,20 +168,26 @@ end
       @object        = object
       @scope         = options[:scope]
       @root          = options.fetch(:root, self.class._root)
+      @polymorphic   = options.fetch(:polymorphic, false)
       @meta_key      = options[:meta_key] || :meta
       @meta          = options[@meta_key]
       @wrap_in_array = options[:_wrap_in_array]
-      @only          = Array(options[:only]) if options[:only]
-      @except        = Array(options[:except]) if options[:except]
+      @only          = options[:only] ? Array(options[:only]) : nil
+      @except        = options[:except] ? Array(options[:except]) : nil
+      @key_format    = options[:key_format]
+      @context       = options[:context]
+      @namespace     = options[:namespace]
     end
-    attr_accessor :object, :scope, :root, :meta_key, :meta
+    attr_accessor :object, :scope, :root, :meta_key, :meta, :key_format, :context, :polymorphic
 
     def json_key
-      if root == true || root.nil?
+      key = if root == true || root.nil?
         self.class.root_name
       else
         root
       end
+
+      key_format == :lower_camel && key.present? ? key.camelize(:lower) : key
     end
     
     def attributes
@@ -168,8 +202,17 @@ end
       associations.each_with_object({}) do |(name, association), hash|
         if included_associations.include? name
           if association.embed_ids?
-            hash[association.key] = serialize_ids association
+            ids = serialize_ids association
+            if association.embed_namespace?
+              hash = hash[association.embed_namespace] ||= {}
+              hash[association.key] = ids
+            else
+              hash[association.key] = ids
+            end
           elsif association.embed_objects?
+            if association.embed_namespace?
+              hash = hash[association.embed_namespace] ||= {}
+            end
             hash[association.embedded_key] = serialize association
           end
         end
@@ -191,9 +234,15 @@ end
       included_associations = filter(associations.keys)
       associations.each_with_object({}) do |(name, association), hash|
         if included_associations.include? name
+          association_serializer = build_serializer(association)
+          # we must do this always because even if the current association is not
+          # embeded in root, it might have its own associations that are embeded in root
+          hash.merge!(association_serializer.embedded_in_root_associations) {|key, oldval, newval| [newval, oldval].flatten }
+
           if association.embed_in_root?
-            association_serializer = build_serializer(association)
-            hash.merge! association_serializer.embedded_in_root_associations
+            if association.embed_in_root_key?
+              hash = hash[association.embed_in_root_key] ||= {}
+            end
 
             serialized_data = association_serializer.serializable_object
             key = association.root_key
@@ -209,7 +258,17 @@ end
 
     def build_serializer(association)
       object = send(association.name)
-      association.build_serializer(object, scope: scope)
+      association.build_serializer(object, association_options_for_serializer(association))
+    end
+
+    def association_options_for_serializer(association)
+      prefix    = association.options[:prefix]
+      namespace = association.options[:namespace] || @namespace || self.namespace
+
+      { scope: scope }.tap do |opts|
+        opts[:namespace] = namespace if namespace
+        opts[:prefix]    = prefix    if prefix
+      end
     end
 
     def serialize(association)
@@ -219,18 +278,54 @@ end
     def serialize_ids(association)
       associated_data = send(association.name)
       if associated_data.respond_to?(:to_ary)
-        associated_data.map { |elem| elem.read_attribute_for_serialization(association.embed_key) }
+        associated_data.map { |elem| serialize_id(elem, association) }
       else
-        associated_data.read_attribute_for_serialization(association.embed_key) if associated_data
+        serialize_id(associated_data, association) if associated_data
       end
+    end
+
+    def key_format
+      @key_format || self.class.key_format || CONFIG.key_format
+    end
+
+    def format_key(key)
+      if key_format == :lower_camel
+        key.to_s.camelize(:lower)
+      else
+        key
+      end
+    end
+
+    def convert_keys(hash)
+      Hash[hash.map do |k,v|
+        key = if k.is_a?(Symbol)
+          format_key(k).to_sym
+        else
+          format_key(k)
+        end
+
+        [key ,v]
+      end]
     end
 
     def serializable_object(options={})
       return @wrap_in_array ? [] : nil if @object.nil?
       hash = attributes
       hash.merge! associations
+      hash = convert_keys(hash) if key_format.present?
+      hash = { :type => type_name(@object), type_name(@object) => hash } if @polymorphic
       @wrap_in_array ? [hash] : hash
     end
     alias_method :serializable_hash, :serializable_object
+
+    def serialize_id(elem, association)
+      id = elem.read_attribute_for_serialization(association.embed_key)
+      association.polymorphic? ? { id: id, type: type_name(elem) } : id
+    end
+
+    def type_name(elem)
+      elem.class.to_s.demodulize.underscore.to_sym
+    end
   end
+
 end

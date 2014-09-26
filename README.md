@@ -1,21 +1,12 @@
-[![Build Status](https://api.travis-ci.org/rails-api/active_model_serializers.png)](https://travis-ci.org/rails-api/active_model_serializers) 
-[![Code Climate](https://codeclimate.com/github/rails-api/active_model_serializers.png)](https://codeclimate.com/github/rails-api/active_model_serializers) 
-[![Coverage Status](https://coveralls.io/repos/rails-api/active_model_serializers/badge.png?branch=master)](https://coveralls.io/r/rails-api/active_model_serializers)
+[![Build Status](https://api.travis-ci.org/rails-api/active_model_serializers.png?branch=0-9-stable)](https://travis-ci.org/rails-api/active_model_serializers)
+[![Code Climate](https://codeclimate.com/github/rails-api/active_model_serializers.png)](https://codeclimate.com/github/rails-api/active_model_serializers)
 
 # ActiveModel::Serializers
 
-## Master - 0.9.0
-
-**master is under development, there are some incompatible changes with the current stable release.**
-
-Since `0.8` there is no `options` accessor in the serializers. Some issues and pull-requests are attemps to bring back the ability to use Rails url helpers in the serializers, but nothing is really settled yet.
-
-If you want to read the stable documentation visit [0.8 README](https://github.com/rails-api/active_model_serializers/blob/0-8-stable/README.md)
-
 ## Purpose
 
-`ActiveModel::Serializers` encapsulates the JSON serialization of objects. 
-Objects that respond to read\_attribute\_for\_serialization 
+`ActiveModel::Serializers` encapsulates the JSON serialization of objects.
+Objects that respond to read\_attribute\_for\_serialization
 (including `ActiveModel` and `ActiveRecord` objects) are supported.
 
 Serializers know about both a model and the `current_user`, so you can
@@ -69,9 +60,11 @@ $ rails g serializer post
 
 ### Support for POROs
 
-Currently `ActiveModel::Serializers` expects objects to implement
-read\_attribute\_for\_serialization. That's all you need to do to have
-your POROs supported. 
+The PORO should include ActiveModel::SerializerSupport. That's all you need to
+do to have your POROs supported.
+
+For Rails versions before Rails 4  ActiveModel::Serializers expects objects to
+implement `read_attribute_for_serialization`.
 
 # render :json
 
@@ -99,6 +92,17 @@ serializer when you render the object:
 
 ```ruby
 render json: @post, serializer: FancyPostSerializer
+```
+
+### Use serialization outside of ActionController::Base
+
+When controller does not inherit from ActionController::Base,
+include Serialization module manually:
+
+```ruby
+class ApplicationController < ActionController::API
+  include ActionController::Serialization
+end
 ```
 
 ## Arrays
@@ -159,7 +163,7 @@ render json: @posts, each_serializer: FancyPostSerializer
 ## Render independently
 
 By default the setting of serializer is in controller as described above which is the
-recommeneded way. However, there may be cases you need to render the json object elsewhere
+recommended way. However, there may be cases you need to render the json object elsewhere
 say in a helper or a view when controller is only for main object.
 
 Then you can render the serialized JSON independently.
@@ -226,6 +230,23 @@ def default_serializer_options
 end
 ```
 
+## Changing the Key Format
+
+You can specify that serializers use the lower-camel key format at the config, class or instance level.
+
+```ruby
+
+ActiveModel::Serializer.setup do |config|
+  config.key_format = :lower_camel
+end
+
+class BlogLowerCamelSerializer < ActiveModel::Serializer
+  format_keys :lower_camel
+end
+
+BlogSerializer.new(object, key_format: :lower_camel)
+```
+
 ## Getting the old version
 
 If you find that your project is already relying on the old rails to_json
@@ -284,7 +305,7 @@ authorization context to your serializer. By default, the context
 is the current user of your application, but this
 [can be customized](#customizing-scope).
 
-Serializers provides a method named `filter`, which should return an array
+Serializers provide a method named `filter`, which should return an array
 used to determine what attributes and associations should be included in the output.
 This is typically used to customize output based on `current_user`. For example:
 
@@ -356,7 +377,7 @@ The above usage of `:meta` will produce the following:
 If you would like to change the meta key name you can use the `:meta_key` option:
 
 ```ruby
-render json: @posts, serializer: CustomArraySerializer, meta: {total: 10}, meta_key: 'meta_object'
+render json: @posts, serializer: CustomArraySerializer, meta_object: {total: 10}, meta_key: 'meta_object'
 ```
 
 The above usage of `:meta_key` will produce the following:
@@ -469,9 +490,6 @@ You may also use the `:serializer` option to specify a custom serializer class a
 
 Serializers are only concerned with multiplicity, and not ownership. `belongs_to` ActiveRecord associations can be included using `has_one` in your serializer.
 
-NOTE: polymorphic was removed because was only supported for has\_one
-associations and is in the TODO list of the project.
-
 ## Embedding Associations
 
 By default, associations will be embedded inside the serialized object. So if
@@ -514,6 +532,33 @@ Now, any associations will be supplied as an Array of IDs:
     "title": "New post",
     "body": "A body!",
     "comment_ids": [ 1, 2, 3 ]
+  }
+}
+```
+
+You may also choose to embed the IDs by the association's name underneath a
+`key` for the resource. For example, say we want to change `comment_ids`
+to `comments` underneath a `links` key:
+
+```ruby
+class PostSerializer < ActiveModel::Serializer
+  attributes :id, :title, :body
+
+  has_many :comments, embed: :ids, key: :comments, embed_namespace: :links
+end
+```
+
+The JSON will look like this:
+
+```json
+{
+  "post": {
+    "id": 1,
+    "title": "New post",
+    "body": "A body!",
+    "links": {
+      "comments": [ 1, 2, 3 ]
+    }
   }
 }
 ```
@@ -585,8 +630,44 @@ this:
 }
 ```
 
-When side-loading data, your serializer cannot have the `{ root: false }` option, 
-as this would lead to invalid JSON. If you do not have a root key, the `include` 
+If you would like to namespace association JSON underneath a certain key in
+the root document (say, `linked`), you can specify an `embed_in_root_key`:
+
+```ruby
+class PostSerializer < ActiveModel::Serializer
+  embed :ids, include: true, embed_in_root_key: :linked
+
+  attributes: :id, :title, :body
+  has_many :comments, :tags
+end
+```
+
+The above would yield the following JSON document:
+
+```json
+{
+  "post": {
+    "id": 1,
+    "title": "New post",
+    "body": "A body!",
+    "comment_ids": [ 1, 2 ]
+  },
+  "linked": {
+    "comments": [
+      { "id": 1, "body": "what a dumb post", "tag_ids": [ 1, 2 ] },
+      { "id": 2, "body": "i liked it", "tag_ids": [ 1, 3 ] },
+    ],
+    "tags": [
+      { "id": 1, "name": "short" },
+      { "id": 2, "name": "whiny" },
+      { "id": 3, "name": "happy" }
+    ]
+  }
+}
+```
+
+When side-loading data, your serializer cannot have the `{ root: false }` option,
+as this would lead to invalid JSON. If you do not have a root key, the `include`
 instruction will be ignored
 
 You can also specify a different root for the embedded objects than the key
@@ -625,7 +706,7 @@ class PostSerializer < ActiveModel::Serializer
   embed :ids, include: true
 
   attributes :id, :title, :body
-  has_many :comments, embed_key: :external_id
+  has_many :comments, key: :external_id
 end
 ```
 
@@ -652,6 +733,78 @@ data looking for information, is extremely useful.
 
 If you are mostly working with the data in simple scenarios and manually making
 Ajax requests, you probably just want to use the default embedded behavior.
+
+
+## Embedding Polymorphic Associations
+
+Because we need both the id and the type to be able to identify a polymorphic associated model, these are serialized in a slightly different format than common ones.
+
+When embedding entire objects:
+
+```ruby
+class PostSerializer < ActiveModel::Serializer
+  attributes :id, :title
+  has_many :attachments, polymorphic: true
+end
+```
+
+```json
+{
+  "post": {
+    "id": 1,
+    "title": "New post",
+    "attachments": [
+      {
+        "type": "image"
+        "image": {
+          "id": 3
+          "name": "logo"
+          "url": "http://images.com/logo.jpg"
+        }
+      },
+      {
+        "type": "video"
+        "video": {
+          "id": 12
+          "uid": "XCSSMDFWW"
+          "source": "youtube"
+        }
+      }
+    ]
+  }
+}
+```
+
+When embedding ids:
+
+```ruby
+class PostSerializer < ActiveModel::Serializer
+  embed :ids
+
+  attributes :id, :title
+  has_many :attachments, polymorphic: true
+end
+```
+
+```json
+{
+  "post": {
+    "id": 1,
+    "title": "New post",
+    "attachment_ids": [
+      {
+        "type": "image"
+        "id": 12
+      },
+      {
+        "type": "video"
+        "id": 3
+      }
+    ]
+  }
+}
+```
+
 
 ## Customizing Scope
 

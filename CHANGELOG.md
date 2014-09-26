@@ -20,6 +20,12 @@
 
 * Require rails >= 3.2.
 
+* Serializers for associations are being looked up in a parent serializer's namespace first. Same with controllers' namespaces.
+
+* Added a "prefix" option in case you want to use a different version of serializer.
+
+* Serializers default namespace can be set in `default_serializer_options` and inherited by associations.
+
 # VERSION 0.8.1
 
 * Fix bug whereby a serializer using 'options' would blow up.
