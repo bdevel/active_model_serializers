@@ -87,7 +87,7 @@ class UserSerializer < ActiveModel::Serializer
   has_one :profile
 end
 
-<<<<<<< HEAD
+
 class AdminSerializer < ActiveModel::Serializer
   attributes :name, :language
   flattened_attributes profile_name: [:profile, :name]
@@ -95,10 +95,10 @@ class AdminSerializer < ActiveModel::Serializer
   def language
     'en'
   end
-=======
+end
+
 class UserInfoSerializer < ActiveModel::Serializer
   has_one :user
->>>>>>> rails-api/0-9-stable
 end
 
 class ProfileSerializer < ActiveModel::Serializer
